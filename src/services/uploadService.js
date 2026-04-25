@@ -14,7 +14,7 @@ const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**
  * Upload image to Cloudinary
- * @param {string} fileBuffer - Base64 encoded file or file path
+ * @param {string|Buffer} fileBuffer - Base64 encoded file, file path, or Buffer
  * @param {string} folder - Cloudinary folder name
  * @param {object} options - Additional upload options
  */
@@ -32,6 +32,27 @@ export const uploadImage = async (fileBuffer, folder = 'general', options = {}) 
       ...options,
     };
 
+    // If fileBuffer is a Buffer, use upload_stream
+    if (Buffer.isBuffer(fileBuffer)) {
+      return new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+          if (error) {
+            reject(new AppError('Failed to upload image. Please try again.', 500));
+          } else {
+            resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+              format: result.format,
+              width: result.width,
+              height: result.height,
+              size: result.bytes,
+            });
+          }
+        }).end(fileBuffer);
+      });
+    }
+
+    // Otherwise use regular upload (for base64 or file paths)
     const result = await cloudinary.uploader.upload(fileBuffer, uploadOptions);
 
     return {
@@ -50,7 +71,7 @@ export const uploadImage = async (fileBuffer, folder = 'general', options = {}) 
 
 /**
  * Upload document to Cloudinary
- * @param {string} fileBuffer - Base64 encoded file or file path
+ * @param {string|Buffer} fileBuffer - Base64 encoded file, file path, or Buffer
  * @param {string} folder - Cloudinary folder name
  */
 export const uploadDocument = async (fileBuffer, folder = 'documents', options = {}) => {
@@ -62,6 +83,25 @@ export const uploadDocument = async (fileBuffer, folder = 'documents', options =
       ...options,
     };
 
+    // If fileBuffer is a Buffer, use upload_stream
+    if (Buffer.isBuffer(fileBuffer)) {
+      return new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+          if (error) {
+            reject(new AppError('Failed to upload document. Please try again.', 500));
+          } else {
+            resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+              format: result.format,
+              size: result.bytes,
+            });
+          }
+        }).end(fileBuffer);
+      });
+    }
+
+    // Otherwise use regular upload (for base64 or file paths)
     const result = await cloudinary.uploader.upload(fileBuffer, uploadOptions);
 
     return {

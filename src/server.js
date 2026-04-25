@@ -1,13 +1,14 @@
+// Load environment variables FIRST
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Then import everything else
 import express from 'express';
 import { createServer } from 'http';
-import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import mongoSanitize from 'express-mongo-sanitize';
-
-// Load environment variables
-dotenv.config();
 
 // Import configurations
 import database from './config/database.js';
@@ -163,11 +164,15 @@ async function startServer() {
     await redisClient.connect();
     logger.info('✓ Redis connected');
 
-    // Verify Cloudinary connection
-    await verifyCloudinaryConnection();
+    // Verify Cloudinary connection (non-blocking)
+    verifyCloudinaryConnection().catch(() => {
+      // Ignore errors, already logged
+    });
 
-    // Verify Email service
-    await emailService.verifyConnection();
+    // Verify Email service (non-blocking)
+    emailService.verifyConnection().catch(() => {
+      // Ignore errors, already logged
+    });
 
     // Initialize Socket.io
     socketManager.initialize(server);

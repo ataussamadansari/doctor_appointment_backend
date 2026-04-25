@@ -16,11 +16,8 @@ export const uploadProfileImage = catchAsync(async (req, res, next) => {
   // Validate file
   uploadService.validateFile(req.file, 'image');
 
-  // Convert buffer to base64
-  const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-
-  // Upload to Cloudinary
-  const result = await uploadService.uploadProfileImage(base64Image);
+  // Upload buffer directly to Cloudinary
+  const result = await uploadService.uploadProfileImage(req.file.buffer);
 
   // Update user/doctor profile
   const Model = req.user.role === 'doctor' ? Doctor : User;
@@ -84,13 +81,10 @@ export const uploadVerificationDocument = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid file format', 400));
   }
 
-  // Convert buffer to base64
-  const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-
-  // Upload to Cloudinary
+  // Upload buffer directly to Cloudinary
   const result = isImage
-    ? await uploadService.uploadImage(base64File, 'verifications')
-    : await uploadService.uploadDocument(base64File, 'verifications');
+    ? await uploadService.uploadImage(req.file.buffer, 'verifications')
+    : await uploadService.uploadDocument(req.file.buffer, 'verifications');
 
   // Add document to doctor's verification documents
   const doctor = await Doctor.findByIdAndUpdate(

@@ -3,15 +3,17 @@ import logger from './logger.js';
 
 /**
  * Email Service
- * Handles sending emails using nodemailer
+ * Lazy transporter — created on first use so dotenv is always loaded first.
  */
 
 class EmailService {
-  constructor() {
-    this.transporter = nodemailer.createTransport({
+  // Transporter is created lazily on first use
+  getTransporter() {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      port: process.env.EMAIL_PORT,
       host: process.env.EMAIL_HOST,
-      port: parseInt(process.env.EMAIL_PORT),
-      secure: process.env.EMAIL_SECURE === 'true',
+      secure: process.env.EMAIL_SECURE,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -24,7 +26,11 @@ class EmailService {
    */
   async verifyConnection() {
     try {
-      await this.transporter.verify();
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        logger.warn('⚠️  Email credentials not configured.');
+        return false;
+      }
+      await this.getTransporter().verify();
       logger.info('✓ Email service connected successfully');
       return true;
     } catch (error) {
@@ -34,177 +40,151 @@ class EmailService {
   }
 
   /**
-   * Send email
+   * Core send method
    */
-  async sendEmail(options) {
+  async sendEmail({ to, subject, text, html }) {
     try {
+      const transporter = this.getTransporter();
       const mailOptions = {
-        from: `${process.env.EMAIL_FROM_NAME} <${process.env.EMAIL_FROM}>`,
-        to: options.to,
-        subject: options.subject,
-        text: options.text,
-        html: options.html,
+        from: `${process.env.EMAIL_FROM_NAME} <${process.env.EMAIL_USER}>`,
+        to,
+        subject,
+        text,
+        html: html || text,
       };
-
-      const info = await this.transporter.sendMail(mailOptions);
-      logger.info(`Email sent: ${info.messageId}`);
+      const info = await transporter.sendMail(mailOptions);
+      logger.info(`✓ Email sent to ${to} — ${info.messageId}`);
       return info;
     } catch (error) {
-      logger.error('Error sending email:', error);
-      throw error;
+      logger.error('Email error:', error.message);
+      throw new Error('Email could not be sent: ' + error.message);
     }
   }
 
-  /**
-   * Send welcome email
-   */
+  // ─── Templates ────────────────────────────────────────────────────────────
+
   async sendWelcomeEmail(user) {
-    const subject = 'Welcome to Doctor Appointment System';
-    const html = `
-      <h1>Welcome ${user.firstName}!</h1>
-      <p>Thank you for registering with Doctor Appointment System.</p>
-      <p>You can now book appointments with verified doctors.</p>
-      <p>Best regards,<br>Doctor Appointment Team</p>
-    `;
-
     await this.sendEmail({
       to: user.email,
-      subject,
-      html,
+      subject: `Welcome to KYRO, ${user.firstName}!`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+          <h2 style="color:#2563eb">Welcome, ${user.firstName}! 👋</h2>
+          <p>Thank you for registering with <strong>KYRO Doctor Appointment</strong>.</p>
+          <p>You can now book appointments with verified doctors anytime.</p>
+          <br/>
+          <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+        </div>
+      `,
     });
   }
 
-  /**
-   * Send appointment confirmation email
-   */
   async sendAppointmentConfirmation(appointment, patient, doctor) {
-    const subject = 'Appointment Confirmation';
-    const html = `
-      <h1>Appointment Confirmed</h1>
-      <p>Dear ${patient.firstName},</p>
-      <p>Your appointment has been confirmed with the following details:</p>
-      <ul>
-        <li><strong>Doctor:</strong> Dr. ${doctor.fullName}</li>
-        <li><strong>Specialization:</strong> ${doctor.specialization}</li>
-        <li><strong>Date:</strong> ${new Date(appointment.appointmentDate).toLocaleDateString()}</li>
-        <li><strong>Time:</strong> ${appointment.appointmentTime}</li>
-        <li><strong>Appointment Number:</strong> ${appointment.appointmentNumber}</li>
-      </ul>
-      <p>Please arrive 10 minutes before your scheduled time.</p>
-      <p>Best regards,<br>Doctor Appointment Team</p>
-    `;
-
     await this.sendEmail({
       to: patient.email,
-      subject,
-      html,
+      subject: 'Appointment Confirmed ✅',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+          <h2 style="color:#16a34a">Appointment Confirmed ✅</h2>
+          <p>Dear <strong>${patient.firstName}</strong>,</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0">
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Doctor</td><td style="padding:8px">Dr. ${doctor.firstName} ${doctor.lastName}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Specialization</td><td style="padding:8px">${doctor.specialization}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Date</td><td style="padding:8px">${new Date(appointment.appointmentDate).toLocaleDateString('en-IN')}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Time</td><td style="padding:8px">${appointment.appointmentTime}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Appointment #</td><td style="padding:8px">${appointment.appointmentNumber}</td></tr>
+          </table>
+          <p style="color:#6b7280;font-size:13px">Please arrive 10 minutes early.</p>
+          <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+        </div>
+      `,
     });
   }
 
-  /**
-   * Send appointment reminder email
-   */
   async sendAppointmentReminder(appointment, patient, doctor) {
-    const subject = 'Appointment Reminder';
-    const html = `
-      <h1>Appointment Reminder</h1>
-      <p>Dear ${patient.firstName},</p>
-      <p>This is a reminder for your upcoming appointment:</p>
-      <ul>
-        <li><strong>Doctor:</strong> Dr. ${doctor.fullName}</li>
-        <li><strong>Date:</strong> ${new Date(appointment.appointmentDate).toLocaleDateString()}</li>
-        <li><strong>Time:</strong> ${appointment.appointmentTime}</li>
-        <li><strong>Appointment Number:</strong> ${appointment.appointmentNumber}</li>
-      </ul>
-      <p>Please arrive 10 minutes before your scheduled time.</p>
-      <p>Best regards,<br>Doctor Appointment Team</p>
-    `;
-
     await this.sendEmail({
       to: patient.email,
-      subject,
-      html,
+      subject: '⏰ Appointment Reminder — Tomorrow',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+          <h2 style="color:#d97706">⏰ Appointment Reminder</h2>
+          <p>Dear <strong>${patient.firstName}</strong>, your appointment is coming up!</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0">
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Doctor</td><td style="padding:8px">Dr. ${doctor.firstName} ${doctor.lastName}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Date</td><td style="padding:8px">${new Date(appointment.appointmentDate).toLocaleDateString('en-IN')}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Time</td><td style="padding:8px">${appointment.appointmentTime}</td></tr>
+          </table>
+          <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+        </div>
+      `,
     });
   }
 
-  /**
-   * Send appointment cancellation email
-   */
   async sendAppointmentCancellation(appointment, patient, doctor) {
-    const subject = 'Appointment Cancelled';
-    const html = `
-      <h1>Appointment Cancelled</h1>
-      <p>Dear ${patient.firstName},</p>
-      <p>Your appointment has been cancelled:</p>
-      <ul>
-        <li><strong>Doctor:</strong> Dr. ${doctor.fullName}</li>
-        <li><strong>Date:</strong> ${new Date(appointment.appointmentDate).toLocaleDateString()}</li>
-        <li><strong>Time:</strong> ${appointment.appointmentTime}</li>
-        <li><strong>Appointment Number:</strong> ${appointment.appointmentNumber}</li>
-        <li><strong>Reason:</strong> ${appointment.cancellationReason || 'Not specified'}</li>
-      </ul>
-      <p>If payment was made, refund will be processed within 5-7 business days.</p>
-      <p>Best regards,<br>Doctor Appointment Team</p>
-    `;
-
     await this.sendEmail({
       to: patient.email,
-      subject,
-      html,
+      subject: 'Appointment Cancelled ❌',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+          <h2 style="color:#dc2626">Appointment Cancelled ❌</h2>
+          <p>Dear <strong>${patient.firstName}</strong>,</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0">
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Doctor</td><td style="padding:8px">Dr. ${doctor.firstName} ${doctor.lastName}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Date</td><td style="padding:8px">${new Date(appointment.appointmentDate).toLocaleDateString('en-IN')}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Time</td><td style="padding:8px">${appointment.appointmentTime}</td></tr>
+            <tr><td style="padding:8px;background:#f9fafb;font-weight:bold">Reason</td><td style="padding:8px">${appointment.cancellationReason || 'Not specified'}</td></tr>
+          </table>
+          <p>If payment was made, refund will be processed within 5–7 business days.</p>
+          <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+        </div>
+      `,
     });
   }
 
-  /**
-   * Send password reset email
-   */
   async sendPasswordResetEmail(user, resetToken) {
-    const frontendBaseUrl = user.role === 'doctor'
-      ? process.env.FRONTEND_DOCTOR_URL || process.env.FRONTEND_PATIENT_URL || 'http://localhost:3001'
-      : process.env.FRONTEND_PATIENT_URL || 'http://localhost:3000';
-    const resetUrl = `${frontendBaseUrl}/reset-password/${resetToken}`;
-    const subject = 'Password Reset Request';
-    const html = `
-      <h1>Password Reset Request</h1>
-      <p>Dear ${user.firstName},</p>
-      <p>You requested to reset your password. Click the link below to reset:</p>
-      <p><a href="${resetUrl}">Reset Password</a></p>
-      <p>This link will expire in 10 minutes.</p>
-      <p>If you didn't request this, please ignore this email.</p>
-      <p>Best regards,<br>Doctor Appointment Team</p>
-    `;
+    const base = process.env.FRONTEND_URL
+      || (user.role === 'doctor' ? process.env.FRONTEND_DOCTOR_URL : process.env.FRONTEND_PATIENT_URL)
+      || 'http://localhost:3000';
+    const resetUrl = `${base}/reset-password/${resetToken}`;
 
     await this.sendEmail({
       to: user.email,
-      subject,
-      html,
+      subject: 'Reset Your Password 🔐',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+          <h2 style="color:#2563eb">Reset Your Password 🔐</h2>
+          <p>Dear <strong>${user.firstName}</strong>,</p>
+          <p>Click the button below to reset your password. This link expires in <strong>10 minutes</strong>.</p>
+          <a href="${resetUrl}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold">Reset Password</a>
+          <p style="color:#6b7280;font-size:13px">If you didn't request this, ignore this email.</p>
+          <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+        </div>
+      `,
     });
   }
 
-  /**
-   * Send doctor verification email
-   */
   async sendDoctorVerificationEmail(doctor, status) {
-    const subject = status === 'approved' ? 'Doctor Profile Approved' : 'Doctor Profile Rejected';
-    const html = status === 'approved'
-      ? `
-        <h1>Congratulations!</h1>
-        <p>Dear Dr. ${doctor.fullName},</p>
-        <p>Your doctor profile has been verified and approved.</p>
-        <p>You can now start accepting appointments from patients.</p>
-        <p>Best regards,<br>Doctor Appointment Team</p>
-      `
-      : `
-        <h1>Profile Verification Update</h1>
-        <p>Dear Dr. ${doctor.fullName},</p>
-        <p>Unfortunately, your doctor profile could not be verified at this time.</p>
-        <p>Please contact support for more information.</p>
-        <p>Best regards,<br>Doctor Appointment Team</p>
-      `;
-
+    const approved = status === 'approved';
     await this.sendEmail({
       to: doctor.email,
-      subject,
-      html,
+      subject: approved ? '🎉 Profile Approved!' : 'Profile Verification Update',
+      html: approved
+        ? `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+            <h2 style="color:#16a34a">Congratulations, Dr. ${doctor.firstName}! 🎉</h2>
+            <p>Your doctor profile has been <strong>verified and approved</strong>.</p>
+            <p>You can now start accepting appointments from patients.</p>
+            <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+          </div>
+        `
+        : `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
+            <h2 style="color:#dc2626">Profile Verification Update</h2>
+            <p>Dear Dr. <strong>${doctor.firstName}</strong>,</p>
+            <p>Unfortunately, your profile could not be verified at this time. Please contact support.</p>
+            <p style="color:#6b7280;font-size:13px">— KYRO Team</p>
+          </div>
+        `,
     });
   }
 }
